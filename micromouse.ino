@@ -28,6 +28,50 @@
 #define fast_read_pin(P) digitalRead(P)
 #endif
 
+// this is what we added
+#define MATRIX_SIZE 8
+#define QUEUE_CAPACITY 64
+#define WALL_THRESHOLD 32
+#define END_POSITIONS_SIZE 4
+
+struct Point {
+  int x, y, distance;
+};
+
+class Queue {
+private:
+  Point arr[QUEUE_CAPACITY];
+  int front, rear, count;
+
+public:
+  Queue() : front(0), rear(-1), count(0) {}
+
+  bool isEmpty() { return count == 0; }
+
+  bool isFull() { return count == QUEUE_CAPACITY; }
+
+  void enqueue(Point item) {
+    if (isFull()) {
+      // Serial.println("Queue Overflow");
+      return;
+    }
+    rear = (rear + 1) % QUEUE_CAPACITY;
+    arr[rear] = item;
+    count++;
+  }
+
+  Point dequeue() {
+    if (isEmpty()) {
+      // Serial.println("Queue Underflow");
+      return {-1, -1}; // Return invalid point
+    }
+    Point item = arr[front];
+    front = (front + 1) % QUEUE_CAPACITY;
+    count--;
+    return item;
+  }
+};
+
 /** =============================================================================================================== **/
 
 /** DEFINE OUR PINS AND WHICH COMPONENTS THEY ARE CONNECTED TO **/
@@ -59,8 +103,29 @@ int prevError;
 int errorIntegral;
 bool switchOn;
 
+
+// Define the start position as a constant
+const Point START = {7, 0, -1};
+// Define the end positions as constants
+const Point END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
+
+// Phototransistors
+const int RIGHT_SENSOR = A0;
+const int FRONT_SENSOR = A1;
+const int LEFT_SENSOR = A2;
+
+// LEDs
+const int EMITTERS = 12;
+
+// The maze
+Point currentPosition;
+int matrix[MATRIX_SIZE][MATRIX_SIZE];
+bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE];
+bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1];
+
 void setup() {
   Serial.begin(9600);
+
   pinMode(ENCODER_R_A, INPUT_PULLUP);
   pinMode(ENCODER_R_B, INPUT_PULLUP);
   pinMode(ENCODER_L_A, INPUT_PULLUP);
@@ -71,8 +136,38 @@ void setup() {
   pinMode(DIR_MOTOR_L, OUTPUT);
   pinMode(DIR_MOTOR_R, OUTPUT);
 
+  pinMode(EMITTERS, OUTPUT);
+
   attachInterrupt(digitalPinToInterrupt(ENCODER_L_B), readEncoderLeft, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_R_A), readEncoderRight, CHANGE);
+
+  // Initialize horizontal walls
+    for (int i = 0; i <= MATRIX_SIZE; i++) {
+        for (int j = 0; j < MATRIX_SIZE; j++) {
+            hWalls[i][j] = false;
+            if (i == 0 || i == MATRIX_SIZE) { 
+                // Top and bottom boundary walls
+                hWalls[i][j] = true;
+            } else {
+                hWalls[i][j] = false;
+            }
+        }
+    }
+    // Initialize vertical walls
+    for (int i = 0; i < MATRIX_SIZE; i++) {
+        for (int j = 0; j <= MATRIX_SIZE; j++) {
+            vWalls[i][j] = false;
+            if (j == 0 || j == MATRIX_SIZE) { 
+                // Left and right boundary walls
+                vWalls[i][j] = true;
+            } else {
+                vWalls[i][j] = false;
+            }
+        }
+    }
+
+  floodFill(matrix, hWalls, vWalls);
+  currentPosition = START;
 }
 
 /** INTERRUPT SERVICE ROUTINES FOR HANDLING ENCODER COUNTING USING STATE TABLE METHOD **/
@@ -199,7 +294,7 @@ void motorPID(int setPoint, float kp, float ki, float kd){
 //==============================================================================================
 // YOUR HOMEWORK ASSIGNMENT: Create a function to convert from encoder ticks to centimeters!
 int tickConvertToCm(int encoderTicks){
-  // Your code here 
+  return encoderTicks/6;
 }
 //==============================================================================================
 
@@ -208,22 +303,133 @@ void loop(){
   // Starter Code
 
   int dipSwitch = analogRead(DIP_SWITCH);
-  //Serial.println(dipSwitch);
+  // Serial.println(dipSwitch);
   if(dipSwitch > 1000){
     switchOn = true;
   }
 
   if(switchOn){
     delay(500); // Wait half a second after pressing the button to actually start moving, safety first!
-    int setPoint = 1000;
+    int setPoint = 10000;
     float kp = 2;
-    float ki = 0.1;
-    float kd = 0.01;
+    float ki = 0.1003;
+    float kd = 1;
     motorPID(setPoint, kp, ki, kd);
 
-    Serial.print(setPoint);
-    Serial.print(" ");
-    Serial.print(rightEncoderPos);
-    Serial.println();
+    Serial.println(setPoint);
+    Serial.print(",");
+    Serial.println(rightEncoderPos);
   }
+
+  wallDetection();
+}
+
+
+// floodfill to call whenever stuck (need to code STUCK LOGIC)
+void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE], bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1]) {
+  // Initialize matrix to -1
+  for (int i = 0; i < MATRIX_SIZE; i++) {
+    for (int j = 0; j < MATRIX_SIZE; j++) {
+      arr[i][j] = -1;
+    }
+  }
+
+  Queue queue;
+
+  // Enqueue end positions with distance 0
+  for (int i = 0; i < END_POSITIONS_SIZE; i++) {
+    queue.enqueue(END[i]);
+    arr[END[i].x][END[i].y] = 0;
+  }
+
+  while (!queue.isEmpty()) {
+    Point p = queue.dequeue();
+
+    // Right neighbor
+    if (p.x >= 0 && p.x < MATRIX_SIZE && p.y >= 0 && p.y < MATRIX_SIZE - 1) {
+      if (!vWalls[p.x][p.y + 1] && arr[p.x][p.y + 1] == -1) { // Check no vertical wall to the right
+        arr[p.x][p.y + 1] = p.distance + 1;
+        queue.enqueue({p.x, p.y + 1, p.distance + 1});
+      }
+    }
+
+    // Down neighbor
+    if (p.x >= 0 && p.x < MATRIX_SIZE - 1 && p.y >= 0 && p.y < MATRIX_SIZE) {
+      if (!hWalls[p.x + 1][p.y] && arr[p.x + 1][p.y] == -1) { // Check no horizontal wall below
+        arr[p.x + 1][p.y] = p.distance + 1;
+        queue.enqueue({p.x + 1, p.y, p.distance + 1});
+      }
+    }
+
+    // Left neighbor
+    if (p.x >= 0 && p.x < MATRIX_SIZE && p.y >= 1 && p.y < MATRIX_SIZE) {
+      if (!vWalls[p.x][p.y] && arr[p.x][p.y - 1] == -1) { // Check no vertical wall to the left
+        arr[p.x][p.y - 1] = p.distance + 1;
+        queue.enqueue({p.x, p.y - 1, p.distance + 1});
+      }
+    }
+
+    // Up neighbor
+    if (p.x >= 1 && p.x < MATRIX_SIZE && p.y >= 0 && p.y < MATRIX_SIZE) {
+      if (!hWalls[p.x][p.y] && arr[p.x - 1][p.y] == -1) { // Check no horizontal wall above
+        arr[p.x - 1][p.y] = p.distance + 1;
+        queue.enqueue({p.x - 1, p.y, p.distance + 1});
+      }
+    }
+  }
+}
+
+void moveToPoint(Point point){
+
+}
+
+void wallDetection(){
+  digitalWrite(EMITTERS, HIGH);
+  int right = analogRead(RIGHT_SENSOR);
+  int front = analogRead(FRONT_SENSOR);
+  int left = analogRead(LEFT_SENSOR);
+
+  if(left > WALL_THRESHOLD){
+    vWalls[currentPosition.x][currentPosition.y] = true;
+  }
+  if(front > WALL_THRESHOLD){
+    hWalls[currentPosition.x][currentPosition.y] = true;
+  }
+  if(right > WALL_THRESHOLD){
+    vWalls[currentPosition.x][currentPosition.y+1] = true;
+  }
+
+  // Serial.println(left);
+}
+
+// Debugging prints
+void printVWalls(){
+  for (int i = 0; i < MATRIX_SIZE; i++) {
+      for (int j = 0; j <= MATRIX_SIZE; j++) {
+        Serial.print(vWalls[i][j] ? "T " : "F ");
+      }
+      Serial.println();
+    }
+    Serial.println();
+}
+
+void printHWalls(){
+  for (int i = 0; i <= MATRIX_SIZE; i++) {
+      for (int j = 0; j < MATRIX_SIZE; j++) {
+        Serial.print(hWalls[i][j] ? "T " : "F ");
+      }
+      Serial.println();
+    }
+    Serial.println();
+}
+
+void printMatrix(){
+  for (int i = 0; i < MATRIX_SIZE; i++) {
+      for (int j = 0; j < MATRIX_SIZE; j++) {
+        Serial.print(matrix[i][j]);
+        Serial.print(" ");
+      }
+      Serial.println();
+    }
+    Serial.println();
 }
