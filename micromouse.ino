@@ -31,10 +31,11 @@
 // this is what we added
 #define MATRIX_SIZE 8
 #define QUEUE_CAPACITY 64
-#define WALL_THRESHOLD 32
+#define WALL_THRESHOLD 16
 #define END_POSITIONS_SIZE 4
 #define CELL_SIZE 108
 
+// This might not need distance, don't think I'm using it right now but could
 struct Cell {
   int x, y, distance;
 };
@@ -111,10 +112,9 @@ int prevError;
 int errorIntegral;
 bool switchOn;
 
-
-// Define the start position as a constant
+// The cell we start the maze in
 const Cell START = {7, 0, -1};
-// Define the end positions as constants
+// The cells we want to reach
 const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
 // Phototransistors
@@ -125,9 +125,10 @@ const int LEFT_SENSOR = A2;
 // LEDs
 const int EMITTERS = 12;
 
-// The maze
-Cell currentPosition;
+// Maze and Robot Data
+Cell currentCell;
 Direction currentDirection;
+Direction direction;
 int matrix[MATRIX_SIZE][MATRIX_SIZE];
 bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE];
 bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1];
@@ -151,33 +152,35 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCODER_R_A), readEncoderRight, CHANGE);
 
   // Initialize horizontal walls
-    for (int i = 0; i <= MATRIX_SIZE; i++) {
-        for (int j = 0; j < MATRIX_SIZE; j++) {
-            hWalls[i][j] = false;
-            if (i == 0 || i == MATRIX_SIZE) { 
-                // Top and bottom boundary walls
-                hWalls[i][j] = true;
-            } else {
-                hWalls[i][j] = false;
-            }
-        }
+  for (int i = 0; i <= MATRIX_SIZE; i++) {
+    for (int j = 0; j < MATRIX_SIZE; j++) {
+      hWalls[i][j] = false;
+      if (i == 0 || i == MATRIX_SIZE) { 
+        // Top and bottom boundary walls
+        hWalls[i][j] = true;
+      } else {
+        hWalls[i][j] = false;
+      }
     }
-    // Initialize vertical walls
-    for (int i = 0; i < MATRIX_SIZE; i++) {
-        for (int j = 0; j <= MATRIX_SIZE; j++) {
-            vWalls[i][j] = false;
-            if (j == 0 || j == MATRIX_SIZE) { 
-                // Left and right boundary walls
-                vWalls[i][j] = true;
-            } else {
-                vWalls[i][j] = false;
-            }
-        }
+  }
+  // Initialize vertical walls
+  for (int i = 0; i < MATRIX_SIZE; i++) {
+    for (int j = 0; j <= MATRIX_SIZE; j++) {
+      vWalls[i][j] = false;
+      if (j == 0 || j == MATRIX_SIZE) { 
+        // Left and right boundary walls
+        vWalls[i][j] = true;
+      } else {
+        vWalls[i][j] = false;
+      }
     }
+  }
 
+  // Initialise the maze and the robot
   floodFill(matrix, hWalls, vWalls);
-  currentPosition = START;
+  currentCell = START;
   currentDirection = NORTH;
+  direction = currentDirection;
 }
 
 /** INTERRUPT SERVICE ROUTINES FOR HANDLING ENCODER COUNTING USING STATE TABLE METHOD **/
@@ -313,13 +316,15 @@ void loop(){
   // Starter Code
 
   int dipSwitch = analogRead(DIP_SWITCH);
-  // Serial.println(dipSwitch);
   if(dipSwitch > 1000){
     switchOn = true;
   }
 
   if(switchOn){
     delay(500); // Wait half a second after pressing the button to actually start moving, safety first!
+    pathfind();
+    wallDetection();
+
     int setPoint = 108;
     float kp = 0.665;
     float ki = 0.22;
@@ -330,13 +335,27 @@ void loop(){
     Serial.print(",");
     Serial.println(rightEncoderPos);
   }
-
-  // wallDetection();
 }
 
+// Check if there is a wall between 2 cells
+bool wallBetween(int fromX, int fromY, int toX, int toY) {
+  if(toX > fromX){
+    return hWalls[toX][fromY];
+  }
+  else if(toX < fromX){
+    return hWalls[fromX][fromY];
+  }
+  else if(toY > fromY){
+    return vWalls[fromX][toY];
+  }
+  else{
+    return vWalls[fromX][fromY];
+  }
+}
 
-// floodfill to call whenever stuck (need to code STUCK LOGIC)
-void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE], bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1]) {
+// Floodfill to call whenever stuck (how do i handle the stuck logic?)
+void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE], 
+                bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1]) {
   // Initialize matrix to -1
   for (int i = 0; i < MATRIX_SIZE; i++) {
     for (int j = 0; j < MATRIX_SIZE; j++) {
@@ -389,6 +408,51 @@ void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][M
   }
 }
 
+// Initial code to traverse maze and find accurate weights for cells
+void pathfind(){
+  int minDistance = matrix[currentCell.x][currentCell.y];
+
+  if (minDistance != 0) {
+    int moveX, moveY;
+    Direction nextStep = direction;
+
+    // Check each direction
+    for (int i = 0; i < 4; i++) {
+      int nextX = currentCell.x;
+      int nextY = currentCell.y;
+      switch (direction) {
+        case NORTH: nextX--; break;
+        case SOUTH: nextX++; break;
+        case WEST: nextY--; break;
+        case EAST: nextY++; break;
+      }
+
+      // Check if next cell is accessible or not
+      if (nextX >= 0 && nextX < MATRIX_SIZE && nextY >= 0 && nextY < MATRIX_SIZE && 
+          !wallBetween(currentCell.x, currentCell.y, nextX, nextY)) {
+        int distance = matrix[nextX][nextY];
+        if (distance < minDistance) {
+          minDistance = distance;
+          nextStep = direction;
+          moveX = nextX;
+          moveY = nextY;
+        }
+      }
+
+      direction = static_cast<Direction>((static_cast<int>(direction) + 1) % 4);
+    }
+
+    // Move to the next cell or recalculate distances
+    if(minDistance == matrix[currentCell.x][currentCell.y]){
+      floodFill(matrix, hWalls, vWalls);
+    }
+    else{
+      moveToCell({moveX, moveY, minDistance}, currentCell);
+    }
+  }
+}
+
+// Robot movement
 void moveToCell(Cell cell, Cell start){
   if(cell.x < start.x){
     changeDirection(NORTH);
@@ -409,13 +473,22 @@ void moveToCell(Cell cell, Cell start){
     int point = (cell.y - start.y) * CELL_SIZE;
   }
 
-
+  Serial.print(currentCell.x);
+  Serial.print(", ");
+  Serial.print(currentCell.y);
+  Serial.print(" -> ");
+  currentCell = cell;
+  Serial.print(currentCell.x);
+  Serial.print(", ");
+  Serial.println(currentCell.y);
 }
 
+// Robot turning
 void changeDirection(Direction direction){
   currentDirection = direction;
 }
 
+// Find where the walls are relative to the robot and their absolute position in the maze
 void wallDetection(){
   digitalWrite(EMITTERS, HIGH);
   int right = analogRead(RIGHT_SENSOR);
@@ -428,20 +501,21 @@ void wallDetection(){
   if(left > WALL_THRESHOLD){
     addX = (currentDirection == WEST) ? 1 : 0;
     addY = (currentDirection == SOUTH) ? 1 : 0;
-    vWalls[currentPosition.x+addX][currentPosition.y+addY] = true;
+    vWalls[currentCell.x+addX][currentCell.y+addY] = true;
+    floodFill(matrix, hWalls, vWalls);
   }
   if(front > WALL_THRESHOLD){
     addX = (currentDirection == SOUTH) ? 1 : 0;
     addY = (currentDirection == EAST) ? 1 : 0;
-    hWalls[currentPosition.x+addX][currentPosition.y+addY] = true;
+    hWalls[currentCell.x+addX][currentCell.y+addY] = true;
   }
   if(right > WALL_THRESHOLD){
     addX = (currentDirection == EAST) ? 1 : 0;
     addY = (currentDirection == NORTH) ? 1 : 0;
-    vWalls[currentPosition.x+addX][currentPosition.y+addY] = true;
+    vWalls[currentCell.x+addX][currentCell.y+addY] = true;
   }
 
-  // Serial.println(left);
+  Serial.println(left);
 }
 
 // Debugging prints
