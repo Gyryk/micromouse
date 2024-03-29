@@ -34,13 +34,20 @@
 #define WALL_THRESHOLD 32
 #define END_POSITIONS_SIZE 4
 
-struct Point {
+struct Cell {
   int x, y, distance;
+};
+
+enum Direction {
+  NORTH,
+  EAST,
+  SOUTH,
+  WEST
 };
 
 class Queue {
 private:
-  Point arr[QUEUE_CAPACITY];
+  Cell arr[QUEUE_CAPACITY];
   int front, rear, count;
 
 public:
@@ -50,7 +57,7 @@ public:
 
   bool isFull() { return count == QUEUE_CAPACITY; }
 
-  void enqueue(Point item) {
+  void enqueue(Cell item) {
     if (isFull()) {
       // Serial.println("Queue Overflow");
       return;
@@ -60,12 +67,12 @@ public:
     count++;
   }
 
-  Point dequeue() {
+  Cell dequeue() {
     if (isEmpty()) {
       // Serial.println("Queue Underflow");
       return {-1, -1}; // Return invalid point
     }
-    Point item = arr[front];
+    Cell item = arr[front];
     front = (front + 1) % QUEUE_CAPACITY;
     count--;
     return item;
@@ -105,9 +112,9 @@ bool switchOn;
 
 
 // Define the start position as a constant
-const Point START = {7, 0, -1};
+const Cell START = {7, 0, -1};
 // Define the end positions as constants
-const Point END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
+const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
 // Phototransistors
 const int RIGHT_SENSOR = A0;
@@ -118,7 +125,8 @@ const int LEFT_SENSOR = A2;
 const int EMITTERS = 12;
 
 // The maze
-Point currentPosition;
+Cell currentPosition;
+Direction currentDirection;
 int matrix[MATRIX_SIZE][MATRIX_SIZE];
 bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE];
 bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1];
@@ -168,6 +176,7 @@ void setup() {
 
   floodFill(matrix, hWalls, vWalls);
   currentPosition = START;
+  currentDirection = NORTH;
 }
 
 /** INTERRUPT SERVICE ROUTINES FOR HANDLING ENCODER COUNTING USING STATE TABLE METHOD **/
@@ -343,7 +352,7 @@ void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][M
   }
 
   while (!queue.isEmpty()) {
-    Point p = queue.dequeue();
+    Cell p = queue.dequeue();
 
     // Right neighbor
     if (p.x >= 0 && p.x < MATRIX_SIZE && p.y >= 0 && p.y < MATRIX_SIZE - 1) {
@@ -379,8 +388,14 @@ void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][M
   }
 }
 
-void moveToPoint(Point point){
+void moveToCell(Cell cell){
+  if(cell.x < currentPosition.x){
+    changeDirection(NORTH);
+  }
+}
 
+void changeDirection(Direction direction){
+  currentDirection = direction;
 }
 
 void wallDetection(){
@@ -389,14 +404,27 @@ void wallDetection(){
   int front = analogRead(FRONT_SENSOR);
   int left = analogRead(LEFT_SENSOR);
 
+  int addX;
+  int addY;
+
   if(left > WALL_THRESHOLD){
-    vWalls[currentPosition.x][currentPosition.y] = true;
+    addX = (currentDirection == WEST) ? 1 : 0;
+    addY = (currentDirection == SOUTH) ? 1 : 0;
+    vWalls[currentPosition.x+addX][currentPosition.y+addY] = true;
   }
   if(front > WALL_THRESHOLD){
-    hWalls[currentPosition.x][currentPosition.y] = true;
+    addX = (currentDirection == SOUTH) ? 1 : 0;
+    addY = (currentDirection == EAST) ? 1 : 0;
+    hWalls[currentPosition.x+addX][currentPosition.y+addY] = true;
   }
   if(right > WALL_THRESHOLD){
-    vWalls[currentPosition.x][currentPosition.y+1] = true;
+    addX = (currentDirection == EAST) ? 1 : 0;
+    addY = (currentDirection == NORTH) ? 1 : 0;
+    Serial.print(addX);
+    Serial.print(",");
+    Serial.print(addY);
+    Serial.println();
+    vWalls[currentPosition.x+addX][currentPosition.y+addY] = true;
   }
 
   // Serial.println(left);
