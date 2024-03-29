@@ -33,6 +33,7 @@
 #define QUEUE_CAPACITY 64
 #define WALL_THRESHOLD 32
 #define END_POSITIONS_SIZE 4
+#define CELL_SIZE 108
 
 struct Cell {
   int x, y, distance;
@@ -319,10 +320,10 @@ void loop(){
 
   if(switchOn){
     delay(500); // Wait half a second after pressing the button to actually start moving, safety first!
-    int setPoint = 10000;
-    float kp = 2;
-    float ki = 0.1003;
-    float kd = 1;
+    int setPoint = 108;
+    float kp = 0.665;
+    float ki = 0.22;
+    float kd = 0.1;
     motorPID(setPoint, kp, ki, kd);
 
     Serial.println(setPoint);
@@ -330,7 +331,7 @@ void loop(){
     Serial.println(rightEncoderPos);
   }
 
-  wallDetection();
+  // wallDetection();
 }
 
 
@@ -388,10 +389,27 @@ void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][M
   }
 }
 
-void moveToCell(Cell cell){
-  if(cell.x < currentPosition.x){
+void moveToCell(Cell cell, Cell start){
+  if(cell.x < start.x){
     changeDirection(NORTH);
+    int point = (start.x - cell.x) * CELL_SIZE;
+    // add this to old setPoint to get new setPoint
+    // how do i get the start cell?
   }
+  else if(cell.x > start.x){
+    changeDirection(SOUTH);
+    int point = (cell.x - start.x) * CELL_SIZE;
+  }
+  else if(cell.y < start.y){
+    changeDirection(WEST);
+    int point = (start.y - cell.y) * CELL_SIZE;
+  }
+  else{
+    changeDirection(EAST);
+    int point = (cell.y - start.y) * CELL_SIZE;
+  }
+
+
 }
 
 void changeDirection(Direction direction){
@@ -420,10 +438,6 @@ void wallDetection(){
   if(right > WALL_THRESHOLD){
     addX = (currentDirection == EAST) ? 1 : 0;
     addY = (currentDirection == NORTH) ? 1 : 0;
-    Serial.print(addX);
-    Serial.print(",");
-    Serial.print(addY);
-    Serial.println();
     vWalls[currentPosition.x+addX][currentPosition.y+addY] = true;
   }
 
