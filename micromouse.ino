@@ -41,7 +41,7 @@ struct Cell {
 };
 
 struct PIDMap {
-  int kp, ki, kd;
+  float kp, ki, kd;
 }
 
 enum Direction {
@@ -123,14 +123,14 @@ const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
 //PIDs
  const PIDMap PID[] = {
-  {0, 0, 0},
-  {0, 0, 0},
-  {0, 0, 0},
-  {0, 0, 0},
-  {0, 0, 0},
-  {0, 0, 0},
-  {0, 0, 0},
-  {0, 0, 0}
+  {0.665, 0.22, 0.1},
+  {0.57, 0.2005, 0.1},
+  {0.53, 0.193, 0.1},
+  {0.52, 0.25, 0.1},
+  {0.57, 0.19, 0.1},
+  {0.52, 0.26, 0.1},
+  {0.5, 0.21, 0.1},
+  {0.49, 0.23, 0.1}
 };
 
 // Phototransistors
@@ -145,14 +145,13 @@ const int EMITTERS = 12;
 Cell currentCell;
 Direction currentDirection;
 Direction direction;
+
 int matrix[MATRIX_SIZE][MATRIX_SIZE];
 bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE];
 bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1];
 
 int point;
-int kP;
-int kI;
-int kD;
+float kP, kI, kD;
 
 void setup() {
   Serial.begin(9600);
@@ -346,10 +345,10 @@ void loop(){
     pathfind();
     wallDetection();
 
-    // int setPoint = 108;
-    // float kp = 0.665;
-    // float ki = 0.22;
-    // float kd = 0.1;
+    // point = 108;
+    // kP = 0.665;
+    // kI = 0.22;
+    // kD = 0.1;
     motorPID(point, kP, kI, kD);
 
     Serial.println(setPoint);
@@ -488,14 +487,17 @@ void moveToCell(Cell target, Cell start){
   kI = PID[cells-1].ki;
   kD = PID[cells-1].kd;
 
-  // Serial.print(currentCell.x);
-  // Serial.print(", ");
-  // Serial.print(currentCell.y);
-  // Serial.print(" -> ");
-  // currentCell = cell;
-  // Serial.print(currentCell.x);
-  // Serial.print(", ");
-  // Serial.println(currentCell.y);
+  // i need to fix this so that cell is not being updated immediately and pathfind isnt overwriting things before they fully execute
+  // i could make this a queue type thing so after pathfinding the robot just keeps adding the turning and ticks to move to a queue that is being read constantly.
+  // queue might not work because robot pathfinds before knowing about walls, but it would definitely work for the final run after pathfinding
+  Serial.print(currentCell.x);
+  Serial.print(", ");
+  Serial.print(currentCell.y);
+  Serial.print(" -> ");
+  currentCell = cell;
+  Serial.print(currentCell.x);
+  Serial.print(", ");
+  Serial.println(currentCell.y);
 }
 
 // Robot rotation
