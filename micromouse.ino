@@ -65,7 +65,7 @@ public:
 
   void enqueue(Cell item) {
     if (isFull()) {
-      // Serial.println("Queue Overflow");
+      Serial.println("Queue Overflow");
       return;
     }
     rear = (rear + 1) % QUEUE_CAPACITY;
@@ -75,7 +75,7 @@ public:
 
   Cell dequeue() {
     if (isEmpty()) {
-      // Serial.println("Queue Underflow");
+      Serial.println("Queue Empty");
       return {-1, -1}; // Return invalid point
     }
     Cell item = arr[front];
@@ -144,6 +144,7 @@ const int EMITTERS = 12;
 // Maze and Robot Data
 Cell currentCell;
 Direction currentDirection;
+Cell pathCell; // Goes ahead and keeps setting the target cell based on old floodfill till it encounters a wall in the way or has to switch directions, at which point it stops
 
 int matrix[MATRIX_SIZE][MATRIX_SIZE];
 bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE];
@@ -199,6 +200,7 @@ void setup() {
   floodFill(matrix, hWalls, vWalls);
   currentCell = START;
   currentDirection = NORTH;
+  pathCell = currentCell;
 }
 
 /** INTERRUPT SERVICE ROUTINES FOR HANDLING ENCODER COUNTING USING STATE TABLE METHOD **/
@@ -350,9 +352,9 @@ void loop(){
     // kD = 0.1;
     motorPID(point, kP, kI, kD);
 
-    // Serial.println(point);
-    // Serial.print(", ");
-    // Serial.println(rightEncoderPos);
+    Serial.println(point);
+    Serial.print(", ");
+    Serial.println(rightEncoderPos);
   }
 }
 
@@ -428,16 +430,17 @@ void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][M
 
 // Initial code to traverse maze and find accurate weights for cells
 void pathfind(){
-  int minDistance = matrix[currentCell.x][currentCell.y];
+  int minDistance = matrix[pathCell.x][pathCell.y];
 
   if (minDistance != 0) {
     int moveX, moveY;
     Direction direction = currentDirection;
+    Direction nextStep = direction;
 
     // Check each direction
     for (int i = 0; i < 4; i++) {
-      int nextX = currentCell.x;
-      int nextY = currentCell.y;
+      int nextX = pathCell.x;
+      int nextY = pathCell.y;
       switch (direction) {
         case NORTH: nextX--; break;
         case SOUTH: nextX++; break;
@@ -446,13 +449,14 @@ void pathfind(){
       }
 
       // Check if next cell is accessible or not
-      if (nextX >= 0 && nextX < MATRIX_SIZE && nextY >= 0 && nextY < MATRIX_SIZE && !wallBetween(currentCell.x, currentCell.y, nextX, nextY)) {
+      if (nextX >= 0 && nextX < MATRIX_SIZE && nextY >= 0 && nextY < MATRIX_SIZE && !wallBetween(pathCell.x, pathCell.y, nextX, nextY)) {
         int distance = matrix[nextX][nextY];
-        // Move to this cell?
+        // Check if cell is optimal or not
         if (distance < minDistance) {
           minDistance = distance;
           moveX = nextX;
           moveY = nextY;
+          nextStep = direction;
         }
       }
 
@@ -460,12 +464,14 @@ void pathfind(){
     }
 
     // Move to the next cell or recalculate distances
-    if(minDistance == matrix[currentCell.x][currentCell.y]){
+    if(minDistance == matrix[pathCell.x][pathCell.y]){
       floodFill(matrix, hWalls, vWalls);
     }
     else{
-      // is start cell fine?
       moveToCell({moveX, moveY, minDistance}, currentCell);
+      if(nextStep == currentDirection){
+        pathCell = {moveX, moveY, minDistance};
+      }
     }
   }
 }
@@ -568,6 +574,7 @@ void wallDetection(){
     addX = (currentDirection == SOUTH) ? 1 : 0;
     addY = (currentDirection == EAST) ? 1 : 0;
     hWalls[currentCell.x+addX][currentCell.y+addY] = true;
+    pathCell = currentCell;
   }
   if(right > WALL_THRESHOLD){
     addX = (currentDirection == EAST) ? 1 : 0;
