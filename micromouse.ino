@@ -31,7 +31,7 @@
 // this is what we added
 #define MATRIX_SIZE 8
 #define QUEUE_CAPACITY 64
-#define WALL_THRESHOLD 16
+#define WALL_THRESHOLD 32
 #define END_POSITIONS_SIZE 4
 #define CELL_SIZE 108
 
@@ -42,7 +42,7 @@ struct Cell {
 
 struct PIDMap {
   float kp, ki, kd;
-}
+};
 
 enum Direction {
   NORTH,
@@ -144,7 +144,6 @@ const int EMITTERS = 12;
 // Maze and Robot Data
 Cell currentCell;
 Direction currentDirection;
-Direction direction;
 
 int matrix[MATRIX_SIZE][MATRIX_SIZE];
 bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE];
@@ -200,7 +199,6 @@ void setup() {
   floodFill(matrix, hWalls, vWalls);
   currentCell = START;
   currentDirection = NORTH;
-  direction = currentDirection;
 }
 
 /** INTERRUPT SERVICE ROUTINES FOR HANDLING ENCODER COUNTING USING STATE TABLE METHOD **/
@@ -344,6 +342,7 @@ void loop(){
     delay(500); // Wait half a second after pressing the button to actually start moving, safety first!
     pathfind();
     wallDetection();
+    updateCurrentCell();
 
     // point = 108;
     // kP = 0.665;
@@ -351,9 +350,9 @@ void loop(){
     // kD = 0.1;
     motorPID(point, kP, kI, kD);
 
-    Serial.println(setPoint);
-    Serial.print(",");
-    Serial.println(rightEncoderPos);
+    // Serial.println(point);
+    // Serial.print(", ");
+    // Serial.println(rightEncoderPos);
   }
 }
 
@@ -374,8 +373,7 @@ bool wallBetween(int fromX, int fromY, int toX, int toY) {
 }
 
 // Floodfill to call whenever stuck (how do i handle the stuck logic?)
-void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE], 
-                bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1]) {
+void floodFill(int arr[MATRIX_SIZE][MATRIX_SIZE], bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE], bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1]) {
   // Initialize matrix to -1
   for (int i = 0; i < MATRIX_SIZE; i++) {
     for (int j = 0; j < MATRIX_SIZE; j++) {
@@ -434,7 +432,7 @@ void pathfind(){
 
   if (minDistance != 0) {
     int moveX, moveY;
-    Direction nextStep = direction;
+    Direction direction = currentDirection;
 
     // Check each direction
     for (int i = 0; i < 4; i++) {
@@ -448,13 +446,11 @@ void pathfind(){
       }
 
       // Check if next cell is accessible or not
-      if (nextX >= 0 && nextX < MATRIX_SIZE && nextY >= 0 && nextY < MATRIX_SIZE && 
-          !wallBetween(currentCell.x, currentCell.y, nextX, nextY)) {
+      if (nextX >= 0 && nextX < MATRIX_SIZE && nextY >= 0 && nextY < MATRIX_SIZE && !wallBetween(currentCell.x, currentCell.y, nextX, nextY)) {
         int distance = matrix[nextX][nextY];
         // Move to this cell?
         if (distance < minDistance) {
           minDistance = distance;
-          nextStep = direction;
           moveX = nextX;
           moveY = nextY;
         }
@@ -479,10 +475,10 @@ void moveToCell(Cell target, Cell start){
   int dX = target.x - start.x;
   int dY = target.y - start.y;
   
-  changeDirection(dX, dY)
+  changeDirection(dX, dY); // how do i make it stop while turning?
 
   int cells = (abs(dX) + abs(dY));
-  point += CELL_SIZE * cells;
+  point = CELL_SIZE * cells;
   kP = PID[cells-1].kp;
   kI = PID[cells-1].ki;
   kD = PID[cells-1].kd;
@@ -490,14 +486,14 @@ void moveToCell(Cell target, Cell start){
   // i need to fix this so that cell is not being updated immediately and pathfind isnt overwriting things before they fully execute
   // i could make this a queue type thing so after pathfinding the robot just keeps adding the turning and ticks to move to a queue that is being read constantly.
   // queue might not work because robot pathfinds before knowing about walls, but it would definitely work for the final run after pathfinding
-  Serial.print(currentCell.x);
+  Serial.print(start.x);
   Serial.print(", ");
-  Serial.print(currentCell.y);
+  Serial.print(start.y);
   Serial.print(" -> ");
-  currentCell = cell;
-  Serial.print(currentCell.x);
+  Serial.print(target.x);
   Serial.print(", ");
-  Serial.println(currentCell.y);
+  Serial.println(target.y);
+  // currentCell = target;
 }
 
 // Robot rotation
@@ -508,10 +504,10 @@ void changeDirection(int x, int y){
   if(x < 0){
     direction = NORTH;
   }
-  else if(dX > 0){
-    direction = SOUTh;
+  else if(x > 0){
+    direction = SOUTH;
   }
-  else if(dY < 0){
+  else if(y < 0){
     direction = WEST;
   }
   else{
@@ -531,6 +527,25 @@ void changeDirection(int x, int y){
   currentDirection = direction;
 
   // reset encoder values? because otherwise it can cause problems
+}
+
+
+// Keep track of what cell the robot is on
+void updateCurrentCell(){
+  int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
+
+  if (rightEncoderPos >= CELL_SIZE) {
+    // Update currentCell based on currentDirection
+    switch (currentDirection) {
+      case NORTH: currentCell.x -= 1; break;
+      case SOUTH: currentCell.x += 1; break;
+      case WEST:  currentCell.y -= 1; break;
+      case EAST:  currentCell.y += 1; break;
+    }
+    rightEncoderPos = 0;
+    leftEncoderPos = 0;
+    point -= CELL_SIZE;
+  }
 }
 
 // Find where the walls are relative to the robot and their absolute position in the maze
@@ -559,8 +574,13 @@ void wallDetection(){
     addY = (currentDirection == NORTH) ? 1 : 0;
     vWalls[currentCell.x+addX][currentCell.y+addY] = true;
   }
-
-  // Serial.println(left); what is the right threshold?
+  // what is the right threshold?
+  Serial.print("left: ");
+  Serial.println(left);
+  Serial.print("front: ");
+  Serial.println(front); 
+  Serial.print("right: ");
+  Serial.println(right); 
 }
 
 // Debugging prints
