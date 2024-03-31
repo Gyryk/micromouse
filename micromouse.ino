@@ -40,6 +40,10 @@ struct Cell {
   int x, y, distance;
 };
 
+struct PIDMap {
+  int kp, ki, kd;
+}
+
 enum Direction {
   NORTH,
   EAST,
@@ -117,6 +121,18 @@ const Cell START = {7, 0, -1};
 // The cells we want to reach
 const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
+//PIDs
+ const PIDMap PID[] = {
+  {0, 0, 0},
+  {0, 0, 0},
+  {0, 0, 0},
+  {0, 0, 0},
+  {0, 0, 0},
+  {0, 0, 0},
+  {0, 0, 0},
+  {0, 0, 0}
+};
+
 // Phototransistors
 const int RIGHT_SENSOR = A0;
 const int FRONT_SENSOR = A1;
@@ -132,6 +148,11 @@ Direction direction;
 int matrix[MATRIX_SIZE][MATRIX_SIZE];
 bool hWalls[MATRIX_SIZE + 1][MATRIX_SIZE];
 bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1];
+
+int point;
+int kP;
+int kI;
+int kD;
 
 void setup() {
   Serial.begin(9600);
@@ -325,11 +346,11 @@ void loop(){
     pathfind();
     wallDetection();
 
-    int setPoint = 108;
-    float kp = 0.665;
-    float ki = 0.22;
-    float kd = 0.1;
-    motorPID(setPoint, kp, ki, kd);
+    // int setPoint = 108;
+    // float kp = 0.665;
+    // float ki = 0.22;
+    // float kd = 0.1;
+    motorPID(point, kP, kI, kD);
 
     Serial.println(setPoint);
     Serial.print(",");
@@ -431,6 +452,7 @@ void pathfind(){
       if (nextX >= 0 && nextX < MATRIX_SIZE && nextY >= 0 && nextY < MATRIX_SIZE && 
           !wallBetween(currentCell.x, currentCell.y, nextX, nextY)) {
         int distance = matrix[nextX][nextY];
+        // Move to this cell?
         if (distance < minDistance) {
           minDistance = distance;
           nextStep = direction;
@@ -447,45 +469,66 @@ void pathfind(){
       floodFill(matrix, hWalls, vWalls);
     }
     else{
+      // is start cell fine?
       moveToCell({moveX, moveY, minDistance}, currentCell);
     }
   }
 }
 
 // Robot movement
-void moveToCell(Cell cell, Cell start){
-  if(cell.x < start.x){
-    changeDirection(NORTH);
-    int point = (start.x - cell.x) * CELL_SIZE;
-    // add this to old setPoint to get new setPoint
-    // how do i get the start cell?
-  }
-  else if(cell.x > start.x){
-    changeDirection(SOUTH);
-    int point = (cell.x - start.x) * CELL_SIZE;
-  }
-  else if(cell.y < start.y){
-    changeDirection(WEST);
-    int point = (start.y - cell.y) * CELL_SIZE;
-  }
-  else{
-    changeDirection(EAST);
-    int point = (cell.y - start.y) * CELL_SIZE;
-  }
+void moveToCell(Cell target, Cell start){
+  int dX = target.x - start.x;
+  int dY = target.y - start.y;
+  
+  changeDirection(dX, dY)
 
-  Serial.print(currentCell.x);
-  Serial.print(", ");
-  Serial.print(currentCell.y);
-  Serial.print(" -> ");
-  currentCell = cell;
-  Serial.print(currentCell.x);
-  Serial.print(", ");
-  Serial.println(currentCell.y);
+  int cells = (abs(dX) + abs(dY));
+  point += CELL_SIZE * cells;
+  kP = PID[cells-1].kp;
+  kI = PID[cells-1].ki;
+  kD = PID[cells-1].kd;
+
+  // Serial.print(currentCell.x);
+  // Serial.print(", ");
+  // Serial.print(currentCell.y);
+  // Serial.print(" -> ");
+  // currentCell = cell;
+  // Serial.print(currentCell.x);
+  // Serial.print(", ");
+  // Serial.println(currentCell.y);
 }
 
-// Robot turning
-void changeDirection(Direction direction){
+// Robot rotation
+void changeDirection(int x, int y){
+  // Absolute direction to look at
+  Direction direction = currentDirection;
+
+  if(x < 0){
+    direction = NORTH;
+  }
+  else if(dX > 0){
+    direction = SOUTh;
+  }
+  else if(dY < 0){
+    direction = WEST;
+  }
+  else{
+    direction = EAST;
+  }
+
+  // Relative direction to turn to
+  int turn = static_cast<int>(direction) - static_cast<int>(currentDirection);
+
+  if (turn == -3 || turn == 1) {
+    // turn 1 right
+  } else if (turn == -2 || turn == 2) {
+    // turn 2 right
+  } else if (turn -1 || turn == 3) {
+    // turn 1 left
+  }
   currentDirection = direction;
+
+  // reset encoder values? because otherwise it can cause problems
 }
 
 // Find where the walls are relative to the robot and their absolute position in the maze
@@ -515,7 +558,7 @@ void wallDetection(){
     vWalls[currentCell.x+addX][currentCell.y+addY] = true;
   }
 
-  Serial.println(left);
+  // Serial.println(left); what is the right threshold?
 }
 
 // Debugging prints
