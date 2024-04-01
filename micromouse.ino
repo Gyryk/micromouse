@@ -297,19 +297,19 @@ void setMotors(int dir, int speed){
     @params ki - intergral gain, use this for steady state errors
     @params kd - derivative gain, use this for overshoot and oscillation handling 
 **/
-void motorPID(int setPoint, float kp, float ki, float kd){
+void motorPID(int setPoint, float kp, float ki, float kd, int leftDir, int rightDir) {
   int currentTime = micros();
   int deltaT = ((float)(currentTime - prevTime)) / 1.0e6; // time difference between ticks in seconds
   prevTime = currentTime; // update prevTime each loop 
   
   int error = setPoint - rightEncoderPos;
   int errorDerivative = (error - prevError) / deltaT;
-  errorIntegral = errorIntegral + error*deltaT;
+  errorIntegral = errorIntegral + error * deltaT;
 
-  float u = kp*error + ki*errorIntegral + kd*errorDerivative; 
+  float u = kp * error + ki * errorIntegral + kd * errorDerivative; 
 
   float speed = fabs(u);
-  if(speed > 255){
+  if (speed > 255) {
     speed = 255;
   }
 
@@ -320,9 +320,12 @@ void motorPID(int setPoint, float kp, float ki, float kd){
     dir = 1; // Move forward
   }
 
-  setMotors(dir, speed);
-  prevError = 0;
+  setMotors(dir * leftDir, speed);
+  setMotors(dir * rightDir, speed);
+
+  prevError = error;
 }
+
 
 //==============================================================================================
 // YOUR HOMEWORK ASSIGNMENT: Create a function to convert from encoder ticks to centimeters!
@@ -352,7 +355,28 @@ void loop(){
     // kI = 0.22;
     // kD = 0.1;
 
-    motorPID(point, kP, kI, kD);
+     int leftDir, rightDir;
+    switch (currentDirection) {
+      case NORTH:
+        leftDir = 1;
+        rightDir = 1;
+        break;
+      case SOUTH:
+        leftDir = -1;
+        rightDir = -1;
+        break;
+      case WEST:
+        leftDir = -1;
+        rightDir = 1;
+        break;
+      case EAST:
+        leftDir = 1;
+        rightDir = -1;
+        break;
+    }
+
+
+    motorPID(point, kP, kI, kD, leftDir, rightDir);
     // Serial.println(point);
     // Serial.print(", ");
     // Serial.println(rightEncoderPos);
@@ -504,38 +528,67 @@ void moveToCell(Cell target, Cell start){
   // currentCell = target; // this is just here for debugging
 }
 
+void turnRobot(int turnDirection, float kp, float ki, float kd) {
+  // Determine the turn angle (e.g., 90 degrees for a right turn)
+  int turnAngle = (turnDirection == 1) ? 90 : -90; // Adjust the angle as needed
+
+  // Convert the turn angle to encoder ticks
+  int targetTicks = convertAngleToTicks(turnAngle);
+
+  // Reset the encoder positions
+  resetEncoders();
+
+  // Perform the turn using PID control
+  int leftDir = (turnDirection == 1) ? -1 : 1;
+  int rightDir = (turnDirection == 1) ? 1 : -1;
+  while (abs(leftEncoderPos) < abs(targetTicks) || abs(rightEncoderPos) < abs(targetTicks)) {
+    motorPID(targetTicks, kp, ki, kd, leftDir, rightDir);
+  }
+
+  // Stop the motors after the turn is complete
+  setMotors(0, 0);
+}
+
+const float robotRadius = 10.0; // Radius of the robot in centimeters
+const float ticksPerCm = 6.0; // Number of encoder ticks per centimeter
+
+int convertAngleToTicks(float angle) {
+  // Calculate the circumference of the robot's rotation circle
+  float circumference = 2 * M_PI * robotRadius;
+
+  // Calculate the distance the robot needs to travel for the given angle
+  float distance = (angle / 360.0) * circumference;
+
+  // Convert the distance to encoder ticks
+  int ticks = static_cast<int>(distance * ticksPerCm);
+
+  return ticks;
+}
+
 // Robot rotation
-void changeDirection(int x, int y){
-  // Absolute direction to look at
-  Direction direction = currentDirection;
+void changeDirection(int x, int y) {
+  Direction desiredDirection;
+  if (x < 0) {
+    desiredDirection = NORTH;
+  } else if (x > 0) {
+    desiredDirection = SOUTH;
+  } else if (y < 0) {
+    desiredDirection = WEST;
+  } else {
+    desiredDirection = EAST;
+  }
 
-  if(x < 0){
-    direction = NORTH;
+  int turnDirection = static_cast<int>(desiredDirection) - static_cast<int>(currentDirection);
+  if (turnDirection == -3) {
+    turnDirection = 1; // Right turn
+  } else if (turnDirection == 3) {
+    turnDirection = -1; // Left turn
   }
-  else if(x > 0){
-    direction = SOUTH;
-  }
-  else if(y < 0){
-    direction = WEST;
-  }
-  else{
-    direction = EAST;
-  }
-  // Serial.println(direction);
 
-  // Relative direction to turn to
-  int turn = static_cast<int>(direction) - static_cast<int>(currentDirection);
+  // Perform the turn
+  turnRobot(turnDirection, kP, kI, kD);
 
-  if (turn == -3 || turn == 1) {
-    // turn 1 right
-  } else if (turn == -2 || turn == 2) {
-    // turn 2 right
-  } else if (turn -1 || turn == 3) {
-    // turn 1 left
-  }
-  currentDirection = direction;
-
-  // reset encoder values? because otherwise it can cause problems with the pid
+  currentDirection = desiredDirection;
 }
 
 
