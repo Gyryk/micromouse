@@ -579,7 +579,7 @@ void wallDetection(){
 
     // This would stop the robot and pathfinding whenever it encounters a wall in front of it and make sure that it doesnt run into it if the point that has been set is too high
     ghostCell = currentCell;
-    point = 0 
+    point = 0; 
     resetEncoders();
   }
   if(right > WALL_THRESHOLD){
