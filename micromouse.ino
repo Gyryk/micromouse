@@ -34,6 +34,7 @@
 #define WALL_THRESHOLD 32
 #define END_POSITIONS_SIZE 4
 #define CELL_SIZE 108
+#define TURN_TICKS 16
 
 // This might not need distance, don't think I'm using it right now but could
 struct Cell {
@@ -115,13 +116,14 @@ int prevTime = 0;
 int prevError;
 int errorIntegral;
 bool switchOn;
+bool turning;
 
 // The cell we start the maze in
 const Cell START = {7, 0, -1};
 // The cells we want to reach
 const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
-//PIDs
+//PIDs -> Finetune further 
  const PIDMap PID[] = {
   {0.665, 0.22, 0.1},
   {0.57, 0.2005, 0.1},
@@ -154,7 +156,7 @@ int point;
 float kP, kI, kD;
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(19200);
 
   pinMode(ENCODER_R_A, INPUT_PULLUP);
   pinMode(ENCODER_R_B, INPUT_PULLUP);
@@ -332,9 +334,7 @@ int tickConvertToCm(int encoderTicks){
 //==============================================================================================
 
 void loop(){
-
   // Starter Code
-
   int dipSwitch = analogRead(DIP_SWITCH);
   if(dipSwitch > 1000){
     switchOn = true;
@@ -352,9 +352,9 @@ void loop(){
     // kI = 0.22;
     // kD = 0.1;
 
-    motorPID(point, kP, kI, kD);
+    if(!turning) motorPID(point, kP, kI, kD);
     // Serial.println(point);
-    // Serial.print(", ");
+    // Serial.print(",");
     // Serial.println(rightEncoderPos);
   }
 }
@@ -485,15 +485,15 @@ void moveToCell(Cell target, Cell start){
   changeDirection(dX, dY); // how do i make it stop while turning?
 
   int cells = (abs(dX) + abs(dY));
-  // this might give the wrong value if i call this before currentCell is updated or something, worth looking into
+  // this might give the wrong value if i call this before current cell is updated or something, worth looking into if something goes wrong
   point = CELL_SIZE * cells;
   kP = PID[cells-1].kp;
   kI = PID[cells-1].ki;
   kD = PID[cells-1].kd;
 
-  // i need to fix this so that cell is not being updated immediately and pathfind isnt overwriting things before they fully execute
-  // i could make this a queue type thing so after pathfinding the robot just keeps adding the turning and ticks to move to a queue that is being read constantly.
-  // queue might not work because robot pathfinds before knowing about walls, but it would definitely work for the final run after pathfinding
+  // i need to fix this so that pathfind isnt overwriting things before they fully execute
+  // i could make this a queue type thing so after pathfinding the robot just keeps adding the turning and ticks to move to a queue that is being read constantly
+  // queue might not work because robot pathfinds before knowing about walls, but it would definitely work for the final run after pathfindind, maybe just reset queue if hit a roadblock
   Serial.print(start.x);
   Serial.print(", ");
   Serial.print(start.y);
@@ -521,29 +521,57 @@ void changeDirection(int x, int y){
   else{
     direction = EAST;
   }
-  // Serial.println(direction);
 
   // Relative direction to turn to
   int turn = static_cast<int>(direction) - static_cast<int>(currentDirection);
 
   if (turn == -3 || turn == 1) {
-    // turn 1 right
-  } else if (turn == -2 || turn == 2) {
-    // turn 2 right
-  } else if (turn -1 || turn == 3) {
-    // turn 1 left
+    turnRobot(1);
+  } else if (abs(turn) == 2) {
+    turnRobot(2);
+  } else if (turn == -1 || turn == 3) {
+    turnRobot(-1);
   }
-  currentDirection = direction;
-
-  // reset encoder values? because otherwise it can cause problems with the pid
+  else{
+    turning = false;
+  }
 }
 
+// Turn the robot
+void turnRobot(int turnAngle){
+  turning = true;
+  int targetTicks = abs(turnAngle) * TURN_TICKS;
+  point = 0;
+  resetEncoders();
+
+  if(turnAngle > 0){
+    digitalWrite(DIR_MOTOR_L, HIGH);
+    digitalWrite(DIR_MOTOR_R, HIGH);
+  }
+  else{
+    digitalWrite(DIR_MOTOR_L, LOW);
+    digitalWrite(DIR_MOTOR_R, LOW);
+  }
+
+  // Start turning
+  analogWrite(SPEED_MOTOR_L, 150);
+  analogWrite(SPEED_MOTOR_R, 150);
+  
+ 
+  while(abs(rightEncoderPos) < targetTicks){ //  && abs(leftEncoderPos) < targetTicks needed
+    // Serial.println(rightEncoderPos);
+    // Serial.println(targetTicks);
+  }
+  turning = false;
+  currentDirection = static_cast<Direction>((static_cast<int>(currentDirection) + turnAngle) % 4);
+  resetEncoders();
+}
 
 // Keep track of what cell the robot is on
 void updateCurrentCell(){
   int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
 
-  if (rightEncoderPos >= CELL_SIZE) {
+  if (rightEncoderPos >= CELL_SIZE) { // need to use distanceMoved instead. may work without that since i am resetting encoders
     // Update currentCell based on currentDirection
     switch (currentDirection) {
       case NORTH: currentCell.x -= 1; break;
@@ -570,16 +598,16 @@ void wallDetection(){
     addX = (currentDirection == WEST) ? 1 : 0;
     addY = (currentDirection == SOUTH) ? 1 : 0;
     vWalls[currentCell.x+addX][currentCell.y+addY] = true;
-    floodFill(matrix, hWalls, vWalls);
   }
   if(front > WALL_THRESHOLD){
     addX = (currentDirection == SOUTH) ? 1 : 0;
     addY = (currentDirection == EAST) ? 1 : 0;
     hWalls[currentCell.x+addX][currentCell.y+addY] = true;
 
-    // This would stop the robot and pathfinding whenever it encounters a wall in front of it and make sure that it doesnt run into it if the point that has been set is too high
+    // Stop the robot and pathfinding whenever it encounters a wall in front of it, prevents running into wall. this might cause issues where the robot is off centre
+    // Could backtrack to help prevent issues but it might cause measurable slowdowns
     ghostCell = currentCell;
-    point = 0 
+    point = 0;
     resetEncoders();
   }
   if(right > WALL_THRESHOLD){
@@ -587,7 +615,7 @@ void wallDetection(){
     addY = (currentDirection == NORTH) ? 1 : 0;
     vWalls[currentCell.x+addX][currentCell.y+addY] = true;
   }
-  // what is the right threshold?
+  // need to test to figure out the best threshold for this in a realistic traversal
   // Serial.print("left: ");
   // Serial.println(left);
   // Serial.print("front: ");
