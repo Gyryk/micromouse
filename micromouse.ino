@@ -33,8 +33,8 @@
 #define QUEUE_CAPACITY 64
 #define WALL_THRESHOLD 22
 #define END_POSITIONS_SIZE 4
-#define CELL_SIZE 108
-#define TURN_TICKS 40
+#define CELL_SIZE 54
+#define TURN_TICKS 14
 #define TOP_SPEED 150
 
 // This might not need distance, don't think I'm using it right now but could
@@ -128,16 +128,16 @@ const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
 //PIDs -> Finetune further 
 const PIDMap PID[] = {
-  {0.665, 0.22, 0.1},
-  {0.57, 0.2005, 0.1},
-  {0.53, 0.193, 0.1},
-  {0.52, 0.25, 0.1},
-  {0.57, 0.19, 0.1},
-  {0.52, 0.26, 0.1},
-  {0.5, 0.21, 0.1},
-  {0.49, 0.23, 0.1}
+  {2, 1, 0.1},
+  {2, 0.2005, 0.1},
+  {2, 0.193, 0.1},
+  {2, 0.25, 0.1},
+  {2, 0.19, 0.1},
+  {2, 0.26, 0.1},
+  {2, 0.21, 0.1},
+  {2, 0.23, 0.1}
 };
-const PIDMap rotatePID = {1.5, 1, 1};
+const PIDMap rotatePID = {3, 2, 2};
 
 // Phototransistors
 const int RIGHT_SENSOR = A0;
@@ -158,9 +158,10 @@ bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1];
 
 int point;
 float kP, kI, kD;
+float kPr = 0.1488;
 
 void setup() {
-  Serial.begin(19200);
+  Serial.begin(9600);
 
   pinMode(ENCODER_R_A, INPUT_PULLUP);
   pinMode(ENCODER_R_B, INPUT_PULLUP);
@@ -210,6 +211,14 @@ void setup() {
 
   turning = false;
   switchOn = false;
+
+  // these are just here for debugging
+  // point = 54;
+  // kP = 3;
+  // kI = 0.22;
+  // kD = 0.1;
+
+  printMatrix();
 }
 
 /** INTERRUPT SERVICE ROUTINES FOR HANDLING ENCODER COUNTING USING STATE TABLE METHOD **/
@@ -231,21 +240,21 @@ void readEncoderLeft() {
     case 0b0111:
     case 0b1110:
     case 0b1000:
-      leftEncoderPos++;
+      leftEncoderPos--;
       break;
     case 0b0010:
     case 0b1100:
     case 0b0101:
     case 0b1011:
-      leftEncoderPos--;
+      leftEncoderPos++;
       break;
 
     default:
       break;
   }
-
   prevState = currState;
 }
+
 void readEncoderRight() {
   static uint8_t prevState = 0; 
   static uint8_t currState = 0; 
@@ -275,7 +284,6 @@ void readEncoderRight() {
     default:
       break;
   }
-  
   prevState = currState;
 }
 
@@ -388,15 +396,9 @@ void loop(){
     wallDetection();
     updateCurrentCell();
 
-    // these are just here for debugging
-    // point = 108;
-    // kP = 0.665;
-    // kI = 0.22;
-    // kD = 0.1;
-
     if(!turning) {
-      motorPID_r(point, kP-0.0588, kI, kD);
-      motorPID_l(point, kP+0.005, kI, kD);
+      motorPID_r(point, kP+kPr, kI, kD);
+      motorPID_l(point, kP, kI, kD);
     }
     // Serial.println(point);
     // Serial.print(",");
@@ -514,9 +516,10 @@ void pathfind(){
       floodFill(matrix, hWalls, vWalls);
     }
     else{
-      if(nextStep == currentDirection || (ghostCell.x == currentCell.x && ghostCell.y == currentCell.y)){
+      if((ghostCell.x == currentCell.x && ghostCell.y == currentCell.y)){ // nextStep == currentDirection || 
         ghostCell = {moveX, moveY, minDistance};
         moveToCell(ghostCell, currentCell);
+        delay(100);
       }
     }
   }
@@ -579,6 +582,7 @@ void changeDirection(int x, int y){
   }
   else{
     turning = false;
+    delay(100);
   }
 }
 
@@ -598,20 +602,24 @@ void turnRobot(int turnAngle){
     motorPID_l(-rotateTarget+5, rotatePID.kp, rotatePID.ki, rotatePID.kd);
   }
  
-  while(abs(rightEncoderPos) < rotateTarget && abs(leftEncoderPos) < rotateTarget){ //  just do 1 encoder instead of both?
-    // Serial.println(rightEncoderPos);
-    // Serial.println(targetTicks);
+  while(abs(rightEncoderPos) < rotateTarget){ // && abs(leftEncoderPos) < rotateTarget
+    // Serial.print(rightEncoderPos);
+    // Serial.print(", ");
+    // Serial.println(leftEncoderPos);
   }
   turning = false;
   currentDirection = static_cast<Direction>((static_cast<int>(currentDirection) + turnAngle) % 4);
+  Serial.println(currentDirection);
+  point = 0;
   resetEncoders();
+  delay(100);
 }
 
 // Keep track of what cell the robot is on
 void updateCurrentCell(){
   int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
 
-  if (distanceMoved >= CELL_SIZE) { // use just rightEncoderPos instead? may work without that since i am resetting encoders
+  if (rightEncoderPos >= CELL_SIZE) { // use just rightEncoderPos instead? may work without that since i am resetting encoders
     // Update currentCell based on currentDirection
     switch (currentDirection) {
       case NORTH: currentCell.x -= 1; break;
@@ -619,41 +627,79 @@ void updateCurrentCell(){
       case WEST:  currentCell.y -= 1; break;
       case EAST:  currentCell.y += 1; break;
     }
-    resetEncoders();
+
     point -= CELL_SIZE;
+    resetEncoders();
+    Serial.print(currentCell.x);
+    Serial.print(", ");
+    Serial.println(currentCell.y);
   }
 }
 
 // Find where the walls are relative to the robot and their absolute position in the maze
 void wallDetection(){
   digitalWrite(EMITTERS, HIGH);
-  int right = analogRead(RIGHT_SENSOR);
-  int front = analogRead(FRONT_SENSOR);
-  int left = analogRead(LEFT_SENSOR);
-
-  int addX;
-  int addY;
+  float right = analogRead(RIGHT_SENSOR) * 1.5;
+  float front = analogRead(FRONT_SENSOR);
+  float left = analogRead(LEFT_SENSOR) * 1.5;
 
   if(left > WALL_THRESHOLD){
-    addX = (currentDirection == WEST) ? 1 : 0;
-    addY = (currentDirection == SOUTH) ? 1 : 0;
-    vWalls[currentCell.x+addX][currentCell.y+addY] = true;
+    switch(currentDirection){
+      case NORTH:
+        vWalls[currentCell.x][currentCell.y] = true;
+        break;
+      case EAST:
+        hWalls[currentCell.x][currentCell.y] = true;
+        break;
+      case SOUTH:
+        vWalls[currentCell.x][currentCell.y+1] = true;
+        break;
+      case WEST:
+        hWalls[currentCell.x+1][currentCell.y] = true;
+        break;
+    }
+    Serial.println("LEFT");
   }
   if(front > WALL_THRESHOLD){
-    addX = (currentDirection == SOUTH) ? 1 : 0;
-    addY = (currentDirection == EAST) ? 1 : 0;
-    hWalls[currentCell.x+addX][currentCell.y+addY] = true;
+    switch(currentDirection){
+      case NORTH:
+        vWalls[currentCell.x][currentCell.y] = true;
+        break;
+      case EAST:
+        hWalls[currentCell.x][currentCell.y+1] = true;
+        break;
+      case SOUTH:
+        vWalls[currentCell.x+1][currentCell.y] = true;
+        break;
+      case WEST:
+        hWalls[currentCell.x][currentCell.y] = true;
+        break;
+    }
+    Serial.println("FRONT");
 
     // Stop the robot and pathfinding whenever it encounters a wall in front of it, prevents running into wall. this might cause issues where the robot is off centre
     // Could backtrack to help prevent issues but it might cause measurable slowdowns
     ghostCell = currentCell;
     point = 0;
     resetEncoders();
+    delay(100);
   }
   if(right > WALL_THRESHOLD){
-    addX = (currentDirection == EAST) ? 1 : 0;
-    addY = (currentDirection == NORTH) ? 1 : 0;
-    vWalls[currentCell.x+addX][currentCell.y+addY] = true;
+    switch(currentDirection){
+      case NORTH:
+        vWalls[currentCell.x][currentCell.y+1] = true;
+        break;
+      case EAST:
+        hWalls[currentCell.x+1][currentCell.y] = true;
+        break;
+      case SOUTH:
+        vWalls[currentCell.x][currentCell.y] = true;
+        break;
+      case WEST:
+        hWalls[currentCell.x][currentCell.y] = true;
+        break;
+    }
+    Serial.println("RIGHT");
   }
   // need to test to figure out the best threshold for this in a realistic traversal
   // Serial.print("left: ");
