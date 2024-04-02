@@ -31,10 +31,11 @@
 // this is what we added
 #define MATRIX_SIZE 8
 #define QUEUE_CAPACITY 64
-#define WALL_THRESHOLD 32
+#define WALL_THRESHOLD 22
 #define END_POSITIONS_SIZE 4
 #define CELL_SIZE 108
-#define TURN_TICKS 16
+#define TURN_TICKS 40
+#define TOP_SPEED 150
 
 // This might not need distance, don't think I'm using it right now but could
 struct Cell {
@@ -113,8 +114,10 @@ volatile int leftEncoderPos = 0; // Counts for left encoder ticks
 
 // Variables to help us with our PID
 int prevTime = 0;
-int prevError;
-int errorIntegral;
+int prevError_l;
+int prevError_r;
+int errorIntegral_l;
+int errorIntegral_r;
 bool switchOn;
 bool turning;
 
@@ -124,7 +127,7 @@ const Cell START = {7, 0, -1};
 const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
 //PIDs -> Finetune further 
- const PIDMap PID[] = {
+const PIDMap PID[] = {
   {0.665, 0.22, 0.1},
   {0.57, 0.2005, 0.1},
   {0.53, 0.193, 0.1},
@@ -134,6 +137,7 @@ const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
   {0.5, 0.21, 0.1},
   {0.49, 0.23, 0.1}
 };
+const PIDMap rotatePID = {1.5, 1, 1};
 
 // Phototransistors
 const int RIGHT_SENSOR = A0;
@@ -203,6 +207,9 @@ void setup() {
   currentCell = START;
   currentDirection = NORTH;
   ghostCell = currentCell;
+
+  turning = false;
+  switchOn = false;
 }
 
 /** INTERRUPT SERVICE ROUTINES FOR HANDLING ENCODER COUNTING USING STATE TABLE METHOD **/
@@ -276,19 +283,27 @@ void readEncoderRight() {
     @params dir - can either be HIGH or LOW for clockwise / counter clockwise rotation
     @params speed - analogWrite() value between 0-255
 **/
-void setMotors(int dir, int speed){
-  analogWrite(SPEED_MOTOR_L, speed);
+void setMotor_r(int dir, int speed){
   analogWrite(SPEED_MOTOR_R, speed);
   
   if(dir == 1){
-    fast_write_pin(DIR_MOTOR_L, HIGH);
     fast_write_pin(DIR_MOTOR_R, LOW);
   } else if (dir == -1){
-    fast_write_pin(DIR_MOTOR_L, LOW);
     fast_write_pin(DIR_MOTOR_R, HIGH);
   } else{
-    analogWrite(SPEED_MOTOR_L, 0);
     analogWrite(SPEED_MOTOR_R, 0);
+  }
+}
+
+void setMotor_l(int dir, int speed){
+  analogWrite(SPEED_MOTOR_L, speed);
+  
+  if(dir == 1){
+    fast_write_pin(DIR_MOTOR_L, HIGH);
+  } else if (dir == -1){
+    fast_write_pin(DIR_MOTOR_L, LOW);
+  } else{
+    analogWrite(SPEED_MOTOR_L, 0);
   }
 }
 
@@ -299,20 +314,20 @@ void setMotors(int dir, int speed){
     @params ki - intergral gain, use this for steady state errors
     @params kd - derivative gain, use this for overshoot and oscillation handling 
 **/
-void motorPID(int setPoint, float kp, float ki, float kd){
+void motorPID_r(int setPoint, float kp, float ki, float kd){
   int currentTime = micros();
   int deltaT = ((float)(currentTime - prevTime)) / 1.0e6; // time difference between ticks in seconds
   prevTime = currentTime; // update prevTime each loop 
   
   int error = setPoint - rightEncoderPos;
-  int errorDerivative = (error - prevError) / deltaT;
-  errorIntegral = errorIntegral + error*deltaT;
+  int errorDerivative_r = (error - prevError_r) / deltaT;
+  errorIntegral_r = errorIntegral_r + error*deltaT;
 
-  float u = kp*error + ki*errorIntegral + kd*errorDerivative; 
+  float u = kp*error + ki*errorIntegral_r + kd*errorDerivative_r; 
 
-  float speed = fabs(u);
-  if(speed > 255){
-    speed = 255;
+  float speed = fabs(u); // Set a top speed
+  if(speed > TOP_SPEED){
+    speed = TOP_SPEED;
   }
 
   int dir = 1;
@@ -322,8 +337,35 @@ void motorPID(int setPoint, float kp, float ki, float kd){
     dir = 1; // Move forward
   }
 
-  setMotors(dir, speed);
-  prevError = 0;
+  setMotor_r(dir, speed);
+  prevError_r = 0;
+}
+
+void motorPID_l(int setPoint, float kp, float ki, float kd){
+  int currentTime = micros();
+  int deltaT = ((float)(currentTime - prevTime)) / 1.0e6; // time difference between ticks in seconds
+  prevTime = currentTime; // update prevTime each loop 
+  
+  int error = setPoint - leftEncoderPos;
+  int errorDerivative_l = (error - prevError_l) / deltaT;
+  errorIntegral_l = errorIntegral_l + error*deltaT;
+
+  float u = kp*error + ki*errorIntegral_l + kd*errorDerivative_l; 
+
+  float speed = fabs(u); // Set a top speed
+  if(speed > TOP_SPEED){
+    speed = TOP_SPEED;
+  }
+
+  int dir = 1;
+  if (u < 0) {
+    dir = -1; // Move backward
+  } else {
+    dir = 1; // Move forward
+  }
+
+  setMotor_l(dir, speed);
+  prevError_l = 0;
 }
 
 //==============================================================================================
@@ -352,7 +394,10 @@ void loop(){
     // kI = 0.22;
     // kD = 0.1;
 
-    if(!turning) motorPID(point, kP, kI, kD);
+    if(!turning) {
+      motorPID_r(point, kP-0.0588, kI, kD);
+      motorPID_l(point, kP+0.005, kI, kD);
+    }
     // Serial.println(point);
     // Serial.print(",");
     // Serial.println(rightEncoderPos);
@@ -540,25 +585,20 @@ void changeDirection(int x, int y){
 // Turn the robot
 void turnRobot(int turnAngle){
   turning = true;
-  int targetTicks = abs(turnAngle) * TURN_TICKS;
+  int rotateTarget = abs(turnAngle) * TURN_TICKS;
   point = 0;
   resetEncoders();
 
   if(turnAngle > 0){
-    digitalWrite(DIR_MOTOR_L, HIGH);
-    digitalWrite(DIR_MOTOR_R, HIGH);
+    motorPID_r(-rotateTarget, rotatePID.kp, rotatePID.ki, rotatePID.kd);
+    motorPID_l(rotateTarget, rotatePID.kp, rotatePID.ki, rotatePID.kd);
   }
   else{
-    digitalWrite(DIR_MOTOR_L, LOW);
-    digitalWrite(DIR_MOTOR_R, LOW);
+    motorPID_r(rotateTarget+5, rotatePID.kp, rotatePID.ki, rotatePID.kd);
+    motorPID_l(-rotateTarget+5, rotatePID.kp, rotatePID.ki, rotatePID.kd);
   }
-
-  // Start turning
-  analogWrite(SPEED_MOTOR_L, 150);
-  analogWrite(SPEED_MOTOR_R, 150);
-  
  
-  while(abs(rightEncoderPos) < targetTicks){ //  && abs(leftEncoderPos) < targetTicks needed
+  while(abs(rightEncoderPos) < rotateTarget && abs(leftEncoderPos) < rotateTarget){ //  just do 1 encoder instead of both?
     // Serial.println(rightEncoderPos);
     // Serial.println(targetTicks);
   }
@@ -571,7 +611,7 @@ void turnRobot(int turnAngle){
 void updateCurrentCell(){
   int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
 
-  if (rightEncoderPos >= CELL_SIZE) { // need to use distanceMoved instead. may work without that since i am resetting encoders
+  if (distanceMoved >= CELL_SIZE) { // use just rightEncoderPos instead? may work without that since i am resetting encoders
     // Update currentCell based on currentDirection
     switch (currentDirection) {
       case NORTH: currentCell.x -= 1; break;
