@@ -31,11 +31,11 @@
 // this is what we added
 #define MATRIX_SIZE 8
 #define QUEUE_CAPACITY 64
-#define WALL_THRESHOLD 22
+#define WALL_THRESHOLD 32
 #define END_POSITIONS_SIZE 4
-#define CELL_SIZE 54
-#define TURN_TICKS 14
-#define TOP_SPEED 150
+#define CELL_SIZE 60
+#define TURN_TICKS 16
+#define TOP_SPEED 255
 
 // This might not need distance, don't think I'm using it right now but could
 struct Cell {
@@ -128,16 +128,16 @@ const Cell END[] = {{2, 5, 0}, {2, 6, 0}, {1, 5, 0}, {1, 6, 0}};
 
 //PIDs -> Finetune further 
 const PIDMap PID[] = {
-  {2, 1, 0.1},
-  {2, 0.2005, 0.1},
-  {2, 0.193, 0.1},
+  {1.0, 2.0, 0.1},
+  {2.0, 2.0, 0.1},
+  {2.0, 1.0, 0.1},
   {2, 0.25, 0.1},
   {2, 0.19, 0.1},
   {2, 0.26, 0.1},
   {2, 0.21, 0.1},
   {2, 0.23, 0.1}
 };
-const PIDMap rotatePID = {3, 2, 2};
+const PIDMap rotatePID = {2, 2, 2}; // 3?
 
 // Phototransistors
 const int RIGHT_SENSOR = A0;
@@ -158,7 +158,7 @@ bool vWalls[MATRIX_SIZE][MATRIX_SIZE + 1];
 
 int point;
 float kP, kI, kD;
-float kPr = 0.1488;
+float kPr = 0.2788;
 
 void setup() {
   Serial.begin(9600);
@@ -178,30 +178,30 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCODER_L_B), readEncoderLeft, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_R_A), readEncoderRight, CHANGE);
 
-  // Initialize horizontal walls
-  for (int i = 0; i <= MATRIX_SIZE; i++) {
-    for (int j = 0; j < MATRIX_SIZE; j++) {
-      hWalls[i][j] = false;
-      if (i == 0 || i == MATRIX_SIZE) { 
-        // Top and bottom boundary walls
-        hWalls[i][j] = true;
-      } else {
-        hWalls[i][j] = false;
-      }
-    }
-  }
-  // Initialize vertical walls
-  for (int i = 0; i < MATRIX_SIZE; i++) {
-    for (int j = 0; j <= MATRIX_SIZE; j++) {
-      vWalls[i][j] = false;
-      if (j == 0 || j == MATRIX_SIZE) { 
-        // Left and right boundary walls
-        vWalls[i][j] = true;
-      } else {
-        vWalls[i][j] = false;
-      }
-    }
-  }
+  // // Initialize horizontal walls
+  // for (int i = 0; i <= MATRIX_SIZE; i++) {
+  //   for (int j = 0; j < MATRIX_SIZE; j++) {
+  //     hWalls[i][j] = false;
+  //     if (i == 0 || i == MATRIX_SIZE) { 
+  //       // Top and bottom boundary walls
+  //       hWalls[i][j] = true;
+  //     } else {
+  //       hWalls[i][j] = false;
+  //     }
+  //   }
+  // }
+  // // Initialize vertical walls
+  // for (int i = 0; i < MATRIX_SIZE; i++) {
+  //   for (int j = 0; j <= MATRIX_SIZE; j++) {
+  //     vWalls[i][j] = false;
+  //     if (j == 0 || j == MATRIX_SIZE) { 
+  //       // Left and right boundary walls
+  //       vWalls[i][j] = true;
+  //     } else {
+  //       vWalls[i][j] = false;
+  //     }
+  //   }
+  // }
 
   // Initialise the maze and the robot
   floodFill(matrix, hWalls, vWalls);
@@ -612,14 +612,12 @@ void turnRobot(int turnAngle){
   Serial.println(currentDirection);
   point = 0;
   resetEncoders();
-  delay(100);
+  delay(50);
 }
 
 // Keep track of what cell the robot is on
 void updateCurrentCell(){
-  int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
-
-  if (rightEncoderPos >= CELL_SIZE) { // use just rightEncoderPos instead? may work without that since i am resetting encoders
+  if (rightEncoderPos >= CELL_SIZE) { // int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
     // Update currentCell based on currentDirection
     switch (currentDirection) {
       case NORTH: currentCell.x -= 1; break;
@@ -627,6 +625,10 @@ void updateCurrentCell(){
       case WEST:  currentCell.y -= 1; break;
       case EAST:  currentCell.y += 1; break;
     }
+
+    // Serial.print(rightEncoderPos);
+    // Serial.print(",");
+    // Serial.println(leftEncoderPos);
 
     point -= CELL_SIZE;
     resetEncoders();
@@ -640,7 +642,7 @@ void updateCurrentCell(){
 void wallDetection(){
   digitalWrite(EMITTERS, HIGH);
   float right = analogRead(RIGHT_SENSOR) * 1.5;
-  float front = analogRead(FRONT_SENSOR);
+  float front = analogRead(FRONT_SENSOR) * 1.1;
   float left = analogRead(LEFT_SENSOR) * 1.5;
 
   if(left > WALL_THRESHOLD){
@@ -663,16 +665,16 @@ void wallDetection(){
   if(front > WALL_THRESHOLD){
     switch(currentDirection){
       case NORTH:
-        vWalls[currentCell.x][currentCell.y] = true;
+        hWalls[currentCell.x][currentCell.y] = true;
         break;
       case EAST:
-        hWalls[currentCell.x][currentCell.y+1] = true;
+        vWalls[currentCell.x][currentCell.y+1] = true;
         break;
       case SOUTH:
-        vWalls[currentCell.x+1][currentCell.y] = true;
+        hWalls[currentCell.x+1][currentCell.y] = true;
         break;
       case WEST:
-        hWalls[currentCell.x][currentCell.y] = true;
+        vWalls[currentCell.x][currentCell.y] = true;
         break;
     }
     Serial.println("FRONT");
@@ -682,7 +684,8 @@ void wallDetection(){
     ghostCell = currentCell;
     point = 0;
     resetEncoders();
-    delay(100);
+    pathfind();
+    delay(200);
   }
   if(right > WALL_THRESHOLD){
     switch(currentDirection){
@@ -701,7 +704,6 @@ void wallDetection(){
     }
     Serial.println("RIGHT");
   }
-  // need to test to figure out the best threshold for this in a realistic traversal
   // Serial.print("left: ");
   // Serial.println(left);
   // Serial.print("front: ");
