@@ -178,30 +178,30 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ENCODER_L_B), readEncoderLeft, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENCODER_R_A), readEncoderRight, CHANGE);
 
-  // // Initialize horizontal walls
-  // for (int i = 0; i <= MATRIX_SIZE; i++) {
-  //   for (int j = 0; j < MATRIX_SIZE; j++) {
-  //     hWalls[i][j] = false;
-  //     if (i == 0 || i == MATRIX_SIZE) { 
-  //       // Top and bottom boundary walls
-  //       hWalls[i][j] = true;
-  //     } else {
-  //       hWalls[i][j] = false;
-  //     }
-  //   }
-  // }
-  // // Initialize vertical walls
-  // for (int i = 0; i < MATRIX_SIZE; i++) {
-  //   for (int j = 0; j <= MATRIX_SIZE; j++) {
-  //     vWalls[i][j] = false;
-  //     if (j == 0 || j == MATRIX_SIZE) { 
-  //       // Left and right boundary walls
-  //       vWalls[i][j] = true;
-  //     } else {
-  //       vWalls[i][j] = false;
-  //     }
-  //   }
-  // }
+  // Initialize horizontal walls
+  for (int i = 0; i <= MATRIX_SIZE; i++) {
+    for (int j = 0; j < MATRIX_SIZE; j++) {
+      hWalls[i][j] = false;
+      if (i == 0 || i == MATRIX_SIZE) { 
+        // Top and bottom boundary walls
+        hWalls[i][j] = true;
+      } else {
+        hWalls[i][j] = false;
+      }
+    }
+  }
+  // Initialize vertical walls
+  for (int i = 0; i < MATRIX_SIZE; i++) {
+    for (int j = 0; j <= MATRIX_SIZE; j++) {
+      vWalls[i][j] = false;
+      if (j == 0 || j == MATRIX_SIZE) { 
+        // Left and right boundary walls
+        vWalls[i][j] = true;
+      } else {
+        vWalls[i][j] = false;
+      }
+    }
+  }
 
   // Initialise the maze and the robot
   floodFill(matrix, hWalls, vWalls);
@@ -516,7 +516,7 @@ void pathfind(){
       floodFill(matrix, hWalls, vWalls);
     }
     else{
-      if((ghostCell.x == currentCell.x && ghostCell.y == currentCell.y)){ // nextStep == currentDirection || 
+      if((ghostCell.x == currentCell.x && ghostCell.y == currentCell.y)){ // || nextStep == currentDirection 
         ghostCell = {moveX, moveY, minDistance};
         moveToCell(ghostCell, currentCell);
         delay(100);
@@ -530,7 +530,7 @@ void moveToCell(Cell target, Cell start){
   int dX = target.x - start.x;
   int dY = target.y - start.y;
   
-  changeDirection(dX, dY); // how do i make it stop while turning?
+  changeDirection(dX, dY);
 
   int cells = (abs(dX) + abs(dY));
   // this might give the wrong value if i call this before current cell is updated or something, worth looking into if something goes wrong
@@ -539,16 +539,15 @@ void moveToCell(Cell target, Cell start){
   kI = PID[cells-1].ki;
   kD = PID[cells-1].kd;
 
-  // i need to fix this so that pathfind isnt overwriting things before they fully execute
   // i could make this a queue type thing so after pathfinding the robot just keeps adding the turning and ticks to move to a queue that is being read constantly
   // queue might not work because robot pathfinds before knowing about walls, but it would definitely work for the final run after pathfindind, maybe just reset queue if hit a roadblock
-  Serial.print(start.x);
-  Serial.print(", ");
-  Serial.print(start.y);
-  Serial.print(" -> ");
-  Serial.print(target.x);
-  Serial.print(", ");
-  Serial.println(target.y);
+  // Serial.print(start.x);
+  // Serial.print(", ");
+  // Serial.print(start.y);
+  // Serial.print(" -> ");
+  // Serial.print(target.x);
+  // Serial.print(", ");
+  // Serial.println(target.y);
   // currentCell = target; // this is just here for debugging
 }
 
@@ -609,7 +608,7 @@ void turnRobot(int turnAngle){
   }
   turning = false;
   currentDirection = static_cast<Direction>((static_cast<int>(currentDirection) + turnAngle) % 4);
-  Serial.println(currentDirection);
+  // Serial.println(currentDirection);
   point = 0;
   resetEncoders();
   delay(50);
@@ -617,7 +616,8 @@ void turnRobot(int turnAngle){
 
 // Keep track of what cell the robot is on
 void updateCurrentCell(){
-  if (rightEncoderPos >= CELL_SIZE) { // int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
+  // int distanceMoved = (rightEncoderPos + leftEncoderPos) / 2;
+  if (rightEncoderPos >= CELL_SIZE) { // distanceMoved instead
     // Update currentCell based on currentDirection
     switch (currentDirection) {
       case NORTH: currentCell.x -= 1; break;
@@ -632,9 +632,9 @@ void updateCurrentCell(){
 
     point -= CELL_SIZE;
     resetEncoders();
-    Serial.print(currentCell.x);
-    Serial.print(", ");
-    Serial.println(currentCell.y);
+    // Serial.print(currentCell.x);
+    // Serial.print(", ");
+    // Serial.println(currentCell.y);
   }
 }
 
@@ -660,7 +660,7 @@ void wallDetection(){
         hWalls[currentCell.x+1][currentCell.y] = true;
         break;
     }
-    Serial.println("LEFT");
+    // Serial.println("LEFT");
   }
   if(front > WALL_THRESHOLD){
     switch(currentDirection){
@@ -677,7 +677,7 @@ void wallDetection(){
         vWalls[currentCell.x][currentCell.y] = true;
         break;
     }
-    Serial.println("FRONT");
+    // Serial.println("FRONT");
 
     // Stop the robot and pathfinding whenever it encounters a wall in front of it, prevents running into wall. this might cause issues where the robot is off centre
     // Could backtrack to help prevent issues but it might cause measurable slowdowns
@@ -702,7 +702,7 @@ void wallDetection(){
         hWalls[currentCell.x][currentCell.y] = true;
         break;
     }
-    Serial.println("RIGHT");
+    // Serial.println("RIGHT");
   }
   // Serial.print("left: ");
   // Serial.println(left);
